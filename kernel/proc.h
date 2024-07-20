@@ -104,4 +104,9 @@ struct proc {
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
+
+
+
+  //  在进程控制块中新增一个变量   供trace使用（完成共享）
+  int trace_mask;
 };
