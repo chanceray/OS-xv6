@@ -22,14 +22,14 @@ int main(int argc, char *argv[])
     write(fd[1],"ping",MAX_MAX);
    
     read(fe[0],buff,MAX_MAX);
-    fprintf(1,"%d:收到了%s\n",p_pid,buff);
+    fprintf(1,"%d: received %s\n",p_pid,buff);
    }
 else//子进程
 {
 int p_pid = getpid();
  
  read(fd[0],buff,MAX_MAX);
-  fprintf(1,"%d:收到了%s\n",p_pid,buff);
+  fprintf(1,"%d: received %s\n",p_pid,buff);
  write(fe[1],"pong",MAX_MAX);
     
     

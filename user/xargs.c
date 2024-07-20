@@ -9,6 +9,7 @@
 int
 main(int argc, char *argv[])
 {
+    sleep(5);
  char buf[MASSAGESIZE];
  read(0,buf,MASSAGESIZE);//获得标准化输入
 

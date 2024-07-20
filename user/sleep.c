@@ -6,20 +6,20 @@
 int main(int argc, char *argv[])
 {
     if(argc <= 1){
-    printf("not enough arguments\n");
+    printf("缺少参数\n");
     exit(0);
 }
 else{
 char *p=argv[1];
 while(*p!='\0'){
 if (*p>'9'||*p<'0'){
-printf("invalid arguments.\n");
+printf("无效参数\n");
 exit(1);
 }
 p++;
 }
 if(argc>2){
-printf("warning:you gave more arguments than needed,first one is used.\n");
+printf("参数过多\n");
 }
 sleep(atoi(argv[1]));
 }

@@ -22,7 +22,7 @@ index=i;
 }}
 if(index==0)
 exit(0);
-fprintf(1,"prime: %d\n",index);
+fprintf(1,"prime %d\n",index);
 
    for(int i=0;i<MAX_MAX;i++)
    {
@@ -58,7 +58,7 @@ int main(int argc, char *argv[])
    {
    
     write(fd[1],buff,MAX_MAX);
-
+wait(0);
    }
    else{
     prime(fd[0],fd[1]);
