@@ -73,8 +73,43 @@ sys_sleep(void)
 #ifdef LAB_PGTBL
 int
 sys_pgaccess(void)
-{
+{  uint64 pp;
+  int n;
+    int bitmask;
+
+  argaddr(0, &pp);
   // lab pgtbl: your code here.
+
+  argint(1, &n);
+  if(n<0||n>100)
+  return -2;
+  //It's okay to set an upper limit on the number of pages that can be scanned.
+  argint(2,&bitmask);
+int res=0;
+struct proc *p = myproc();
+for(int i=0;i<n;i++)
+{
+uint64 va=pp+i*PGSIZE;//获得虚拟地址
+
+ pte_t *pte;
+  if(va >= MAXVA)
+    return 0;
+
+  pte = walk(p->pagetable, va, 0);
+  if(pte == 0)
+    return 0;
+  if((*pte & PTE_A)){
+    *pte=*pte&(~PTE_A);
+    res=res|1<<i;
+  }
+
+}
+
+  
+if(copyout(p->pagetable, bitmask, (char *)&res, sizeof(res)) < 0)
+      return -1;
+
+
   return 0;
 }
 #endif
