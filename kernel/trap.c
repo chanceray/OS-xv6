@@ -77,8 +77,19 @@ usertrap(void)
     exit(-1);
 
   // give up the CPU if this is a timer interrupt.
-  if(which_dev == 2)
-    yield();
+  if(which_dev == 2){
+    if(p->ticks>0)
+    {
+      p->ticks_count++;
+      if(p->handler_exec==0&&p->ticks_count>=p->ticks)
+      {
+        p->ticks_count=0;
+        p->handler_exec=1;
+        memmove(&(p->ticks_temp), p->trapframe, sizeof(*(p->trapframe)));
+        p->trapframe->epc=p->handler;//决定了用户空间代码恢复执行的指令地址
+      }
+    }
+    yield();}
 
   usertrapret();
 }
