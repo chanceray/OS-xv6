@@ -95,13 +95,34 @@ e1000_init(uint32 *xregs)
 int
 e1000_transmit(struct mbuf *m)
 {
-  //
-  // Your code here.
-  //
-  // the mbuf contains an ethernet frame; program it into
-  // the TX descriptor ring so that the e1000 sends it. Stash
-  // a pointer so that it can be freed after sending.
-  //
+   //printf("这是transmit\n");
+  acquire(&e1000_lock);//First ask the E1000 for the TX ring index at which it's expecting the next packet, by reading the E1000_TDT control register.
+ uint32 a=regs[E1000_TDT];
+ a=a%TX_RING_SIZE;
+ //printf("%d",a);
+  if((tx_ring[a].status&E1000_TXD_STAT_DD)!=E1000_TXD_STAT_DD)
+  return -1;
+  if(tx_mbufs[a])
+  mbuffree(tx_mbufs[a]);//Otherwise, use mbuffree() to free the last mbuf that was transmitted from that descriptor (if there was one).
+
+//Then fill in the descriptor. m->head points to the packet's content in memory, 
+//and m->len is the packet length. Set the necessary cmd flags (look at Section 3.3 in the E1000 manual) and stash away a pointer to the mbuf for later freeing.
+
+tx_mbufs[a]=m;
+tx_ring[a].addr=(uint64)m->head;
+tx_ring[a].length=(uint16)m->len;
+tx_ring[a].cmd=9;
+regs[E1000_TDT]=(a+1)%TX_RING_SIZE;
+release(&e1000_lock);
+//Finally, update the ring position by adding one to E1000_TDT modulo TX_RING_SIZE.
+//If e1000_transmit() added the mbuf successfully to the ring, return 0. On failure (e.g., there is no descriptor available to transmit the mbuf), return -1 so that the caller knows to free the mbuf.
+//
+// Your code here.
+//
+// the mbuf contains an ethernet frame; program it into
+// the TX descriptor ring so that the e1000 sends it. Stash
+// a pointer so that it can be freed after sending.
+//
   
   return 0;
 }
@@ -109,6 +130,31 @@ e1000_transmit(struct mbuf *m)
 static void
 e1000_recv(void)
 {
+//与发送类似
+//First ask the E1000 for the ring index at which the next waiting received packet (if any) is located, 
+//by fetching the E1000_RDT control register and adding one modulo RX_RING_SIZE.
+uint32 a = regs[E1000_RDT];
+//Then check if a new packet is available by checking for the E1000_RXD_STAT_DD bit in the status portion of the descriptor. If not, stop.
+a= (a+1)%RX_RING_SIZE;
+while((rx_ring[a].status & E1000_RXD_STAT_DD) == E1000_RXD_STAT_DD){
+  //Otherwise, update the mbuf's m->len to the length reported in the descriptor. Deliver the mbuf to the network stack using net_rx().
+rx_mbufs[a]->len = rx_ring[a].length;
+
+net_rx(rx_mbufs[a]);
+//Then allocate a new mbuf using mbufalloc() to replace the one just given to net_rx(). 
+//Program its data pointer (m->head) into the descriptor. Clear the descriptor's status bits to zero.
+rx_mbufs[a] = mbufalloc(0);
+rx_ring[a].addr = (uint64)rx_mbufs[a]->head;
+
+rx_ring[a].status = 0;
+a=(a+1)%RX_RING_SIZE;
+}
+//Finally, update the E1000_RDT register to be the index of the last ring descriptor processed.
+regs[E1000_RDT] = a-1;
+
+
+
+
   //
   // Your code here.
   //
