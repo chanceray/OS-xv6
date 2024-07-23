@@ -31,11 +31,11 @@ struct {
 int pagecnt(void *pa_start, void *pa_end)
 {
   char *p;
-  int cnt=0;
+  
   p = (char *) PGROUNDUP((uint64) pa_start);
   for (; p + PGSIZE <= (char *) pa_end; p += PGSIZE) 
-  cnt++;
-  return cnt;
+  kmem.pagecnt++;
+  return kmem.pagecnt;
   }
 
 
