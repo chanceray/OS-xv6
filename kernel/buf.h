@@ -8,5 +8,7 @@ struct buf {
   struct buf *prev; // LRU cache list
   struct buf *next;
   uchar data[BSIZE];
+  uint ttime;  // 时间戳
+  uint bktplace;  //在对应桶中的位置
 };
 

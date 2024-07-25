@@ -23,32 +23,58 @@
 #include "fs.h"
 #include "buf.h"
 
+struct hashbucket
+{
+  struct spinlock lock;
+  struct buf *bucketinnerbuf[NBUF];
+  uint innerbuf_num;
+};
+
+
 struct {
   struct spinlock lock;
   struct buf buf[NBUF];
-
+  struct hashbucket hashbkt[NBUCKET];
+  uint glob_ttime;  //时间戳
   // Linked list of all buffers, through prev/next.
   // Sorted by how recently the buffer was used.
   // head.next is most recent, head.prev is least.
-  struct buf head;
+  //struct buf head;
 } bcache;
+
+
+struct hashbucket*
+bhash(uint blockno) {
+    return &bcache.hashbkt[blockno % NBUCKET];
+}
 
 void
 binit(void)
 {
   struct buf *b;
-
+int i;
   initlock(&bcache.lock, "bcache");
+    bcache.glob_ttime=0;
+struct hashbucket *temp;
+  //对于bcache的每一个桶，进行初始化
 
-  // Create linked list of buffers
-  bcache.head.prev = &bcache.head;
-  bcache.head.next = &bcache.head;
-  for(b = bcache.buf; b < bcache.buf+NBUF; b++){
-    b->next = bcache.head.next;
-    b->prev = &bcache.head;
-    initsleeplock(&b->lock, "buffer");
-    bcache.head.next->prev = b;
-    bcache.head.next = b;
+for(temp=bcache.hashbkt;temp<bcache.hashbkt+NBUCKET;temp++)
+{
+  initlock(&temp->lock,"buffer");
+  temp->innerbuf_num=0;
+}
+
+
+  
+  for(i=0,b = bcache.buf; b < bcache.buf+NBUF; b++,i++){
+        b->blockno = i;
+        b->refcnt = 0;
+        b->ttime = 0;
+       
+        b->valid = 0;
+        struct hashbucket *bkt = bhash(b->blockno);
+        b->bktplace = bkt->innerbuf_num;
+        bkt->bucketinnerbuf[bkt->innerbuf_num++] = b;
   }
 }
 
@@ -58,34 +84,96 @@ binit(void)
 static struct buf*
 bget(uint dev, uint blockno)
 {
-  struct buf *b;
-
-  acquire(&bcache.lock);
+  struct buf *b=0;
+  struct hashbucket* bkt = bhash(blockno);
+  acquire(&bkt->lock);//小锁
 
   // Is the block already cached?
-  for(b = bcache.head.next; b != &bcache.head; b = b->next){
+  for(int i=0;i<bkt->innerbuf_num;i++){
+    b=bkt->bucketinnerbuf[i];
+    if(b->dev == dev && b->blockno == blockno){
+      b->refcnt++;
+      release(&bkt->lock);
+      acquiresleep(&b->lock);
+      return b;
+    }
+  }
+//没有找到！！
+release(&bkt->lock);
+acquire(&bcache.lock);
+acquire(&bkt->lock);
+//上面的释放再分配的主要目的是为了避免死锁，要先大锁再小锁
+
+//于是 重新检查一遍
+for(int i=0;i<bkt->innerbuf_num;i++){
+    b=bkt->bucketinnerbuf[i];
     if(b->dev == dev && b->blockno == blockno){
       b->refcnt++;
       release(&bcache.lock);
+      release(&bkt->lock);
       acquiresleep(&b->lock);
       return b;
     }
   }
 
-  // Not cached.
-  // Recycle the least recently used (LRU) unused buffer.
-  for(b = bcache.head.prev; b != &bcache.head; b = b->prev){
-    if(b->refcnt == 0) {
-      b->dev = dev;
-      b->blockno = blockno;
-      b->valid = 0;
-      b->refcnt = 1;
-      release(&bcache.lock);
-      acquiresleep(&b->lock);
-      return b;
-    }
+while(1){
+struct buf* eviction_buf=0;//将要指向替换的指针
+int min_ttime=2147483647;
+for(struct buf *temp=bcache.buf;temp<bcache.buf+NBUF;temp++)
+{
+  if(temp->refcnt==0&&temp->ttime<min_ttime)
+  {
+    min_ttime=temp->ttime;
+    eviction_buf=temp;
+  
+  
   }
-  panic("bget: no buffers");
+
+
+
+
+
+}
+if(eviction_buf==0){
+panic("死锁啦啊啊啊");
+}
+struct hashbucket* eviction_bkt = bhash(eviction_buf->blockno);//获得倒霉蛋的桶
+//确定不要重复加锁了
+if(eviction_bkt!=bkt)
+  acquire(&eviction_bkt->lock);
+if(eviction_buf->refcnt!=0)
+{
+  if(eviction_bkt!=bkt)
+  release(&eviction_bkt->lock);
+  continue;
+}
+//正常情况
+//驱逐倒霉蛋
+uint num=eviction_bkt->innerbuf_num; 
+if(eviction_buf->bktplace<num-1)//不是最后一个，换最后一个的位置并且修改有关值
+{
+eviction_bkt->bucketinnerbuf[eviction_buf->bktplace]=eviction_bkt->bucketinnerbuf[num-1];
+eviction_bkt->bucketinnerbuf[eviction_buf->bktplace]->bktplace=eviction_buf->bktplace;
+}
+eviction_bkt->innerbuf_num--;
+if(eviction_bkt!=bkt)
+  release(&eviction_bkt->lock);//已完成倒霉蛋所在的桶的相关操作
+
+//按照给的代码一样操作
+eviction_buf->bktplace=bkt->innerbuf_num;
+bkt->bucketinnerbuf[bkt->innerbuf_num++]=eviction_buf;
+ eviction_buf->dev = dev;
+eviction_buf->blockno = blockno;
+  eviction_buf->valid = 0;
+  eviction_buf->refcnt = 1;
+      release(&bcache.lock);
+      release(&bkt->lock);
+      acquiresleep(&eviction_buf->lock);
+         return eviction_buf;
+}
+  
+  
+  
 }
 
 // Return a locked buf with the contents of the indicated block.
@@ -95,6 +183,7 @@ bread(uint dev, uint blockno)
   struct buf *b;
 
   b = bget(dev, blockno);
+  bcache.glob_ttime=b->ttime=bcache.glob_ttime+1;
   if(!b->valid) {
     virtio_disk_rw(b, 0);
     b->valid = 1;
@@ -108,6 +197,7 @@ bwrite(struct buf *b)
 {
   if(!holdingsleep(&b->lock))
     panic("bwrite");
+  bcache.glob_ttime=b->ttime=bcache.glob_ttime+1;
   virtio_disk_rw(b, 1);
 }
 
@@ -118,36 +208,36 @@ brelse(struct buf *b)
 {
   if(!holdingsleep(&b->lock))
     panic("brelse");
-
+//因为我们有桶，所以用小锁
+  struct hashbucket* bkt = bhash(b->blockno);
   releasesleep(&b->lock);
 
-  acquire(&bcache.lock);
+  acquire(&bkt->lock);
   b->refcnt--;
   if (b->refcnt == 0) {
     // no one is waiting for it.
-    b->next->prev = b->prev;
-    b->prev->next = b->next;
-    b->next = bcache.head.next;
-    b->prev = &bcache.head;
-    bcache.head.next->prev = b;
-    bcache.head.next = b;
+   b->ttime = 0;
   }
   
-  release(&bcache.lock);
+  release(&bkt->lock);
 }
 
 void
 bpin(struct buf *b) {
-  acquire(&bcache.lock);
+  //因为我们有桶，所以用小锁
+  struct hashbucket* bkt = bhash(b->blockno);
+  acquire(&bkt->lock);
   b->refcnt++;
-  release(&bcache.lock);
+  bcache.glob_ttime=b->ttime=bcache.glob_ttime+1;
+  release(&bkt->lock);
 }
 
 void
 bunpin(struct buf *b) {
-  acquire(&bcache.lock);
+ struct hashbucket* bkt = bhash(b->blockno);
+  acquire(&bkt->lock);
   b->refcnt--;
-  release(&bcache.lock);
+  release(&bkt->lock);
 }
 
 
