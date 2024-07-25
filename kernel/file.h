@@ -26,7 +26,7 @@ struct inode {
   short minor;
   short nlink;
   uint size;
-  uint addrs[NDIRECT+1];
+  uint addrs[NDIRECT+2];//更改 file.h 中结构 inode 中 addrs[] 的声明。确保 struct inode 和 struct dinode 具有 它们的 addrs[] 数组中相同数量的元素。
 };
 
 // map major device number to device functions.

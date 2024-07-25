@@ -333,6 +333,32 @@ sys_open(void)
       end_op();
       return -1;
     }
+
+if(!(omode&O_NOFOLLOW))//有链接
+{
+  for(int i=0;i<10&&ip->type==T_SYMLINK;i++)
+  {
+    if(readi(ip, 0, (uint64)&path, 0, MAXPATH) ==0){
+      iunlockput(ip);
+      end_op();
+      return -1;
+    }
+    if(namei(path)==0){
+      iunlockput(ip);
+      end_op();
+      return -1;
+    }
+    iunlockput(ip);
+    ip=namei(path);
+    ilock(ip);
+    if(i==9){
+      iunlockput(ip);
+      end_op();
+      return -1;
+    }
+  }
+}
+
   }
 
   if(ip->type == T_DEVICE && (ip->major < 0 || ip->major >= NDEV)){
@@ -502,4 +528,28 @@ sys_pipe(void)
     return -1;
   }
   return 0;
+}
+
+
+uint64 sys_symlink(void){
+  char target[MAXPATH], path[MAXPATH];
+  struct inode *dp, *ip; //用于操作文件系统中的节点
+
+if(argstr(0, target, MAXPATH)<0||argstr(1, path, MAXPATH)<0)
+return -1;
+begin_op();
+if((ip = namei(target)) != 0)
+if(ip->type == T_DIR)
+{end_op();
+return -1;}
+if( (dp = create(path, T_SYMLINK, 0, 0)) == 0)//创建一个新的 inode
+{end_op();
+return -1;}
+if (writei(dp, 0, (uint64)target, 0, MAXPATH) != MAXPATH)//写入到这个 inode
+panic("symlink: writei");
+iunlockput (dp); 
+end_op();
+return 0;
+
+  
 }

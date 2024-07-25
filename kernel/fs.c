@@ -416,6 +416,38 @@ bmap(struct inode *ip, uint bn)
     brelse(bp);
     return addr;
   }
+bn -= NINDIRECT;
+//下面是二级索引
+if(bn < N2INDIRECT){
+    // Load 二级索引 block, allocating if necessary.
+    if((addr = ip->addrs[NDIRECT+1]) == 0){
+      addr = balloc(ip->dev);
+      if(addr == 0)
+        return 0;
+      ip->addrs[NDIRECT+1] = addr;
+    }
+    bp = bread(ip->dev, addr);
+    a = (uint*)bp->data;
+    if((addr = a[bn/NINDIRECT]) == 0){
+      addr = balloc(ip->dev);
+      if(addr){
+        a[bn/NINDIRECT] = addr;//因为是二级索引，所以要除以NINDIRECT
+        log_write(bp);
+      }
+    }
+    brelse(bp);
+    bp = bread(ip->dev, addr);
+    a = (uint*)bp->data;
+    if((addr = a[bn%NINDIRECT]) == 0){
+      addr = balloc(ip->dev);
+      if(addr){
+        a[bn%NINDIRECT] = addr;//因为是二级索引，所以要模NINDIRECT
+        log_write(bp);
+      }
+    }
+    brelse(bp);
+    return addr;
+  }
 
   panic("bmap: out of range");
 }
