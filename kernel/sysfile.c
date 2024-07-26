@@ -503,3 +503,99 @@ sys_pipe(void)
   }
   return 0;
 }
+
+
+///void *mmap(void *addr, int length, int prot, int flags,
+   ///        int fd, uint offset);
+
+
+uint64
+sys_mmap(void){
+
+struct file *f;
+uint64 addr; // 相应内存部分起始地址
+int length; 
+int prot; 
+int flags;        
+int fd;
+int offset; 
+argaddr(0, &addr) ;
+argint(1, &length);
+argint(2, &prot);   
+argint(3, &flags);
+argfd(4, &fd, &f);
+argint(5, &offset);
+
+  if(!(f->writable) && (prot & PROT_WRITE) && flags == MAP_SHARED){
+    return -1;
+  }
+//当文件不可写，但映射请求写权限，并且映射类型是共享的时候，存在潜在的问题。
+//在共享映射中，内存页面的内容会直接反映文件内容的更改。
+//如果文件是只读的，但映射请求了写权限，这将导致一个悖论，因为写入到内存的更改无法反映回一个只读文件。
+
+  struct proc *p=myproc();
+  length = PGROUNDUP(length); 
+  if(p->sz > MAXVA - length){
+    return -1;
+  }
+  // 遍历vma数组，寻找未使用区域映射文件
+  for(int i = 0; i < MAX_VMAs; i++) {
+    if(p->vma[i].valid == 0) {
+      p->vma[i].valid = 1;
+      p->vma[i].addr = p->sz;// 设置映射的起始地址为当前进程的虚拟地址空间大小。
+      p->vma[i].length = length;
+      p->vma[i].f = f;
+      p->vma[i].prot = prot;
+      p->vma[i].flags = flags;
+      p->vma[i].fd = fd;
+      p->vma[i].offset = offset;
+      filedup(f); // 增加文件的引用计数，确保在映射期间文件保持打开状态
+      p->sz += length;
+      return p->vma[i].addr;
+    }
+  }
+  return -1;
+}
+
+
+///int munmap(void *addr, int len);
+
+uint64
+sys_munmap(void){
+  uint64 addr;
+  int length;
+  argaddr(0, &addr);
+  argint(1, &length); 
+  addr = PGROUNDDOWN(addr); 
+  length = PGROUNDUP(length);
+  struct proc *p = myproc();
+  struct vma *vma = 0;
+  // 找vma
+  for(int i = 0; i < MAX_VMAs; i++) {
+   if (addr >= p->vma[i].addr||addr<p->vma[i].addr+p->vma[i].length) {
+      vma = &p->vma[i];
+      break;
+    }
+  }
+    //没找到
+    if(vma == 0){
+      return 0;
+    }
+    if(vma->addr == addr) {
+      vma->addr += length; 
+      vma->length -= length;
+      //共享块要写回
+      if(vma->flags & MAP_SHARED){
+        filewrite(vma->f, addr, length);
+      }
+      // 释放
+      uvmunmap(p->pagetable, addr, length/PGSIZE, 1);
+      if(vma->length == 0) {
+        fileclose(vma->f);
+        vma->valid = 0;
+      }
+    }
+
+  return 0;
+
+}

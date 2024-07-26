@@ -5,7 +5,10 @@
 #include "spinlock.h"
 #include "proc.h"
 #include "defs.h"
-
+#include "fcntl.h"
+#include "sleeplock.h"
+#include "fs.h"
+#include "file.h"
 struct spinlock tickslock;
 uint ticks;
 
@@ -67,7 +70,55 @@ usertrap(void)
     syscall();
   } else if((which_dev = devintr()) != 0){
     // ok
-  } else {
+   }
+    else if( r_scause() == 13 || r_scause() == 15 ){
+    uint64 va = r_stval();
+    
+    if(va >= p->sz ) 
+      p->killed = 1;
+    if( PGROUNDUP(va) == PGROUNDDOWN(p->trapframe->sp))
+    p->killed = 1;
+    if(va > MAXVA )
+    p->killed = 1;
+   //是否可以找到
+    struct vma *vma = 0;
+    for (int i = 0; i < MAX_VMAs; i++) {
+      if (p->vma[i].valid == 1 && va >= p->vma[i].addr && va < p->vma[i].addr + p->vma[i].length) {//检查地址是否在某个有效的VMA范围内。
+        vma = &p->vma[i];
+        break;
+      }
+    }
+    // 找到了
+    if(vma) {
+      va = PGROUNDDOWN(va);
+      uint64 offset = va - vma->addr;//计算偏移量
+      uint64 mem = (uint64)kalloc();
+
+      if(mem == 0) {
+        p->killed = 1;
+      } else {
+        memset((void*)mem, 0, PGSIZE);
+        ilock(vma->f->ip);
+        readi(vma->f->ip, 0, mem, offset, PGSIZE);//文件系统读取数据填充到分配的内存
+        iunlock(vma->f->ip);
+        // 设置标志位
+        int flag = PTE_U;
+        //要根据vma的性质来对flag赋值
+        if(vma->prot & PROT_READ)
+          flag |= PTE_R;
+        if(vma->prot & PROT_WRITE)
+          flag |= PTE_W;
+        if(vma->prot & PROT_EXEC)
+          flag |= PTE_X;
+        // 将虚拟地址和物理地址映射
+        if(mappages(p->pagetable, va, PGSIZE, mem, flag) != 0) {
+          kfree((void*)mem);
+          p->killed = 1;
+        }
+      }
+   }
+ }
+  else {
     printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
     printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
     setkilled(p);

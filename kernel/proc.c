@@ -5,6 +5,7 @@
 #include "spinlock.h"
 #include "proc.h"
 #include "defs.h"
+#include "fcntl.h"
 
 struct cpu cpus[NCPU];
 
@@ -320,6 +321,16 @@ fork(void)
 
   acquire(&np->lock);
   np->state = RUNNABLE;
+  //对于映射，应该与父进程一致
+  
+  for(int i = 0; i < MAX_VMAs; i++) {
+
+    if(p->vma[i].valid==1){//有效就拷贝过来，因为文件指针的限制，否则无效也可以
+      memmove(&(np->vma[i]), &(p->vma[i]), sizeof(p->vma[i]));
+
+      filedup(p->vma[i].f);//文件拷贝
+    }
+  }
   release(&np->lock);
 
   return pid;
@@ -359,7 +370,19 @@ exit(int status)
       p->ofile[fd] = 0;
     }
   }
+//此时对于文件要释放
 
+ for(int i = 0; i < MAX_VMAs; i++) {
+    if(p->vma[i].valid==1) {
+      if(p->vma[i].flags&MAP_SHARED)//是共享状态
+        filewrite(p->vma[i].f, p->vma[i].addr, p->vma[i].length);//写回
+      fileclose(p->vma[i].f);
+      uvmunmap(p->pagetable, p->vma[i].addr, p->vma[i].length/PGSIZE, 1);//解除
+
+      p->vma[i].valid = 0;
+    }
+  }
+ 
   begin_op();
   iput(p->cwd);
   end_op();

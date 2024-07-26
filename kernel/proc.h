@@ -1,3 +1,15 @@
+#define MAX_VMAs 16
+struct vma {
+  struct file *f;//包含文件指针
+  int fd;       // 文件的描述符
+  int offset;   // 偏移量
+  int valid;    // 是否有效
+  uint64 addr;  // 起始地址
+  int length; 
+  int prot;     // 内存映射是否为可读可写，用PROT_READ、PROT_WRITE等表示，二进制
+  int flags;    // 标志位，二进制表示
+
+};
 // Saved registers for kernel context switches.
 struct context {
   uint64 ra;
@@ -82,6 +94,9 @@ struct trapframe {
 enum procstate { UNUSED, USED, SLEEPING, RUNNABLE, RUNNING, ZOMBIE };
 
 // Per-process state
+
+
+
 struct proc {
   struct spinlock lock;
 
@@ -104,4 +119,5 @@ struct proc {
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
+  struct vma vma[MAX_VMAs]; // 进程的vma结构体数组
 };
